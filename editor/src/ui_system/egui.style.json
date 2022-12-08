@@ -1,0 +1,106 @@
+{
+    "visuals": {
+        "widgets": {
+            "noninteractive": {
+                "bg_fill": "0x292525ff",
+                "bg_stroke": {
+                    "width": 1,
+                    "color": "0x191212ff"
+                },
+                "rounding": 2,
+                "fg_stroke": {
+                    "width": 1,
+                    "color": "0x8c8c8cff"
+                },
+                "expansion": 0
+            },
+            "inactive": {
+                "bg_fill": "0x3d3e43ff",
+                "bg_stroke": {
+                    "width": 0,
+                    "color": "0x00000000"
+                },
+                "rounding": 2,
+                "fg_stroke": {
+                    "width": 1,
+                    "color": "0xb4b4b4ff"
+                },
+                "expansion": 0
+            },
+            "hovered": {
+                "bg_fill": "0x59616fff",
+                "bg_stroke": {
+                    "width": 1,
+                    "color": "0x969696ff"
+                },
+                "rounding": 3,
+                "fg_stroke": {
+                    "width": 1.5,
+                    "color": "0xf0f0f0ff"
+                },
+                "expansion": 1
+            },
+            "active": {
+                "bg_fill": "0x373737ff",
+                "bg_stroke": {
+                    "width": 1,
+                    "color": "0xffffffff"
+                },
+                "rounding": 2,
+                "fg_stroke": {
+                    "width": 2,
+                    "color": "0xffffffff"
+                },
+                "expansion": 1
+            },
+            "open": {
+                "bg_fill": "0x007d81ff",
+                "bg_stroke": {
+                    "width": 1,
+                    "color": "0x3c3c3cff"
+                },
+                "rounding": 2,
+                "fg_stroke": {
+                    "width": 1,
+                    "color": "0xd2d2d2ff"
+                },
+                "expansion": 0
+            }
+        },
+        "selection": {
+            "bg_fill": "0x007e80ff",
+            "stroke": {
+                "width": 1,
+                "color": "0xc0deffff"
+            }
+        },
+        "hyperlink_color": "0x5aaaffff",
+        "faint_bg_color": "0x241f1fff",
+        "extreme_bg_color": "0x1a1414ff",
+        "code_bg_color": "0x404040ff",
+        "warn_fg_color": "0xff8f00ff",
+        "error_fg_color": "0xff0000ff",
+        "window_rounding": 4,
+        "window_shadow": {
+            "extrusion": 8,
+            "color": "0x000000c9"
+        },
+        "popup_shadow": {
+            "extrusion": 16,
+            "color": "0x00000060"
+        },
+        "resize_corner_size": 12,
+        "text_cursor_width": 2,
+        "clip_rect_margin": 3,
+        "text_cursor_preview": false,
+        "button_frame": true,
+        "collapsing_header_frame": true
+    },
+    "text": {
+        "Small": 11,
+        "Body": 14,
+        "Monospace": 14,
+        "Button": 14,
+        "Heading": 14
+    }
+}

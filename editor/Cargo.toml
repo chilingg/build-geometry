@@ -1,0 +1,19 @@
+[package]
+name = "editor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+backend = { path = "../backend" }
+
+json = "0.12"
+anyhow = "1.0"
+
+wgpu = "0.13"
+winit = "0.27"
+
+egui = "0.19"
+egui-winit = "0.19"
+egui-wgpu = "0.19"
