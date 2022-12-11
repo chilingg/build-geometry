@@ -95,7 +95,7 @@ impl State {
                 compatible_surface: Some(&surface), // 兼容传入的surface
                 force_fallback_adapter: false, // 是否强制wgpu选择某个能在所有硬件上工作的适配器（软渲染系统）
             }
-        )).unwrap();
+        )).expect("Couldn't create the adapter!");
         // let adapter = instance
         //     .enumerate_adapters(wgpu::Backends::all())
         //     .filter(|adapter| {
@@ -111,7 +111,7 @@ impl State {
                 label: None,
             },
             None, // 是否追踪APIg调用路径
-        )).unwrap();
+        )).expect("Couldn't create the device!");
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
