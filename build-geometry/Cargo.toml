@@ -4,3 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+backend = { path = "../backend" }
+
+bytemuck = { version = "1.12", features = [ "derive" ] }
+lyon_geom = "1.0"
+lyon_path = "1.0"
+pollster = "0.2"
+# cgmath = "0.18"
+
+wgpu = "0.13"
+winit = "0.27"
