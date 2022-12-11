@@ -37,7 +37,23 @@ impl System for UiSystem {
     }
 
     fn precess(&mut self, event: &winit::event::WindowEvent) -> bool {
-        self.state.on_event(&self.ctx, event)
+        use winit::event::*;
+
+        self.state.on_event(&self.ctx, event);
+        match event {
+            WindowEvent::KeyboardInput {
+                input: KeyboardInput {
+                    virtual_keycode: Some(VirtualKeyCode::F12),
+                    state: ElementState::Pressed,
+                    ..
+                },
+                ..
+            } => { 
+                self.style_editer.open = !self.style_editer.open;
+                true
+            },
+            _ => false,
+        }
     }
 
     fn update(&mut self, state: &State) {

@@ -1,14 +1,14 @@
 use json::object;
 
 pub struct StyleEditor {
-    open: bool,
+    pub open: bool,
 }
 
 impl StyleEditor {
     const STYLE_FILE_NAME: &str = "egui.style.json";
 
     pub fn new() -> Self {
-        StyleEditor { open: true }
+        StyleEditor { open: false }
     }
 
     fn load_current_style() -> anyhow::Result<egui::Style> {
