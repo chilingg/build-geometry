@@ -15,22 +15,26 @@ type Vector = lyon_geom::Vector<f32>;
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct BezierUniform {
-    p0: [f32; 2],
-    p1: [f32; 2],
-    p2: [f32; 2],
-    p3: [f32; 2],
-    segment_size: u32,
-    pading: u32,
+pub struct BezierUniform {
+    pub p0: [f32; 2],
+    pub p1: [f32; 2],
+    pub p2: [f32; 2],
+    pub p3: [f32; 2],
+    pub segment_size: u32,
+    pub stroke_width: f32,
 }
 
 impl BezierUniform {
-    fn update_from_bezier_segment(&mut self, segment: &BezierSegment, tolerance: u32, pixel_ratio: f32) {
+    // 每1/RATIO个像素长度为一渲染段
+    const RATIO: f32 = 0.1;
+
+    fn update_from(&mut self, segment: &BezierSegment, stroke_width: f32, tolerance: f32, pixel_ratio: f32) {
         self.p0 = segment.from.into();
         self.p1 = segment.ctrl1.into();
         self.p2 = segment.ctrl2.into();
         self.p3 = segment.to.into();
-        self.segment_size = (segment.approximate_length(tolerance as f32) * pixel_ratio).round() as u32;
+        self.segment_size = (segment.approximate_length(tolerance) * Self::RATIO * pixel_ratio).round() as u32;
+        self.stroke_width = stroke_width.abs();
     }
 }
 
@@ -72,10 +76,11 @@ pub struct GameSystemStruct {
     center: Point,
     pixel_ratio: f32,
 
-    bezier_uniform: BezierUniform,
+    pub bezier_uniform: (BezierUniform, bool),
     bezier_bind_group: wgpu::BindGroup,
-    bezier_segment: BezierSegment,
-    tolerance: u32,
+    bezier_buffer: wgpu::Buffer,
+    pub bezier_segment: BezierSegment,
+    pub tolerance: f32,
 }
 
 pub struct GameSystem {
@@ -88,22 +93,27 @@ impl GameSystem {
             data: None
         }
     }
+
+    pub fn data(&mut self) -> Option<&mut GameSystemStruct> {
+        self.data.as_mut()
+    }
 }
 
 impl System for GameSystem {
     fn start(&mut self, state: &State) {
         let center = Point::new(0.0, 0.0);
         let pixel_ratio = 1.0;
-        let tolerance = 10;
+        let tolerance = 10.0;
+        let stroke_width = 10.0;
     
         let bezier_segment = BezierSegment {
-            from: Point::new(-400.0, -400.0),
+            from: Point::new(0.0, -400.0),
             ctrl1: Point::new(-400.0, -400.0),
-            ctrl2: Point::new(400.0, -400.0),
-            to: Point::new(400.0, 400.0),
+            ctrl2: Point::new(400.0, 400.0),
+            to: Point::new(0.0, 400.0),
         };
         let mut bezier_uniform = BezierUniform::default();
-        bezier_uniform.update_from_bezier_segment(&bezier_segment, tolerance, pixel_ratio);
+        bezier_uniform.update_from(&bezier_segment, stroke_width, tolerance, pixel_ratio);
         let bezier_buffer = state.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Bezier buffer"),
             contents: bytemuck::cast_slice(&[bezier_uniform]),
@@ -198,10 +208,10 @@ impl System for GameSystem {
                 })]
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineStrip,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 // 如果将该字段设置为除了 Fill 之外的任何值，都需要 Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
                 // 需要 Features::DEPTH_CLIP_ENABLE
@@ -226,8 +236,9 @@ impl System for GameSystem {
             center,
             pixel_ratio,
         
-            bezier_uniform,
+            bezier_uniform: (bezier_uniform, false),
             bezier_bind_group,
+            bezier_buffer,
             bezier_segment,
             tolerance,
         })
@@ -235,6 +246,18 @@ impl System for GameSystem {
 
     fn finish(&mut self) {
         self.data = None;
+    }
+
+    fn update(&mut self, state: &State) {
+        if let Some(game) = self.data.as_mut() {
+            match &mut game.bezier_uniform {
+                (bezier_uniform, dirty) if *dirty => {
+                    bezier_uniform.update_from(&game.bezier_segment, bezier_uniform.stroke_width, game.tolerance, game.pixel_ratio);
+                    state.queue.write_buffer(&game.bezier_buffer, 0, bytemuck::cast_slice(&[*bezier_uniform]));
+                },
+                _ => {}
+            }
+        }
     }
 
     fn render(&mut self, state: &State, view: &wgpu::TextureView) {
@@ -260,7 +283,8 @@ impl System for GameSystem {
                 render_pass.set_pipeline(&game.render_pipeline);
                 render_pass.set_bind_group(0, &game.bezier_bind_group, &[]);
                 render_pass.set_bind_group(1, &game.view_bind_group, &[]);
-                render_pass.draw(0..game.bezier_uniform.segment_size + 1, 0..1);
+
+                render_pass.draw(0..game.bezier_uniform.0.segment_size * 2 + 2, 0..1);
             }
 
             state.queue.submit(std::iter::once(encoder.finish()));

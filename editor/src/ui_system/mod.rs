@@ -6,13 +6,19 @@ use egui_wgpu::renderer::{
 };
 
 mod style_editor;
+mod game_ctrl;
 
 pub struct UiSystem {
     state: egui_winit::State,
     ctx: egui::Context,
     rpass: egui_wgpu::renderer::RenderPass,
+
     style_editer: style_editor::StyleEditor,
+    game_ctrl: game_ctrl::GameCtrl,
+
     output_data: Option<(egui::TexturesDelta, Vec<egui::ClippedPrimitive>)>,
+
+    game: build_geometry::game_system::GameSystem,
 }
 
 impl UiSystem {
@@ -26,33 +32,41 @@ impl UiSystem {
                 1
             ),
             style_editer: style_editor::StyleEditor::new(),
+            game_ctrl: game_ctrl::GameCtrl::new(),
             output_data: None,
+            game: build_geometry::game_system::GameSystem::new(),
         }
     }
 }
 
 impl System for UiSystem {
-    fn start(&mut self, _state: &State) {
+    fn start(&mut self, state: &State) {
         self.ctx.set_style(style_editor::default_style());
+        self.game.start(state);
     }
 
     fn precess(&mut self, event: &winit::event::WindowEvent) -> bool {
         use winit::event::*;
 
-        self.state.on_event(&self.ctx, event);
-        match event {
-            WindowEvent::KeyboardInput {
-                input: KeyboardInput {
-                    virtual_keycode: Some(VirtualKeyCode::F12),
-                    state: ElementState::Pressed,
+        if self.state.on_event(&self.ctx, event) {
+            true
+        } else if self.game.precess(event) {
+            true
+        } else {
+            match event {
+                WindowEvent::KeyboardInput {
+                    input: KeyboardInput {
+                        virtual_keycode: Some(VirtualKeyCode::F12),
+                        state: ElementState::Pressed,
+                        ..
+                    },
                     ..
+                } => { 
+                    self.style_editer.open = !self.style_editer.open;
+                    true
                 },
-                ..
-            } => { 
-                self.style_editer.open = !self.style_editer.open;
-                true
-            },
-            _ => false,
+                _ => false,
+            }
         }
     }
 
@@ -61,6 +75,7 @@ impl System for UiSystem {
         let raw_input = self.state.take_egui_input(&state.window);
         let full_output = self.ctx.run(raw_input, |ctx| {
             self.style_editer.ui(ctx);
+            self.game_ctrl.ui(ctx, &mut self.game);
         });
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.
@@ -68,9 +83,14 @@ impl System for UiSystem {
 
         self.output_data = Some((full_output.textures_delta, paint_jobs));
         self.state.handle_platform_output(&state.window, &self.ctx, full_output.platform_output);
+
+        // Game update
+        self.game.update(state);
     }
 
     fn render(&mut self, state: &State, view: &wgpu::TextureView) {
+        self.game.render(state, view);
+        
         if let Some((textures_delta, paint_jobs)) = self.output_data.take() {
             let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("encoder"),
@@ -92,7 +112,7 @@ impl System for UiSystem {
                 &view,
                 &paint_jobs,
                 &screen_descriptor,
-                Some(wgpu::Color::BLACK),
+                None,
             );
             // Submit the commands.
             state.queue.submit(std::iter::once(encoder.finish()));
