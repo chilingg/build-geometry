@@ -49,7 +49,7 @@ impl<T> App<T> {
                     }
                 },
                 Event::RedrawRequested(window_id) if window_id == state.window.id() => {
-                    match state.clean_screen() {
+                    match state.get_screen_texture() {
                         Ok((output, view)) => {
                             system.render(&state, &view);
                             output.present();
@@ -144,36 +144,10 @@ impl State {
         winit::dpi::PhysicalSize::new(self.config.width, self.config.height)
     }
 
-    pub fn clean_screen(&self) -> Result<(wgpu::SurfaceTexture, wgpu::TextureView), wgpu::SurfaceError> {
+    pub fn get_screen_texture(&self) -> Result<(wgpu::SurfaceTexture, wgpu::TextureView), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder"),
-        });
-
-        {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.,
-                            g: 0.,
-                            b: 0.,
-                            a: 1.,
-                        }),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: None,
-            });
-        }
-
-        // submit 方法能传入任何实现了 IntoIter 的参数
-        self.queue.submit(std::iter::once(encoder.finish()));
-
+        
         Ok((output, view))
     }
 }
