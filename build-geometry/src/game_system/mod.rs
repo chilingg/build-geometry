@@ -70,6 +70,7 @@ impl Default for MatrixUniform {
 
 pub struct GameSystemStruct {
     render_pipeline: wgpu::RenderPipeline,
+    pub screen_texture: (wgpu::Texture, bool),
 
     view_uniform: MatrixUniform,
     view_bind_group: wgpu::BindGroup,
@@ -83,11 +84,32 @@ pub struct GameSystemStruct {
     pub tolerance: f32,
 }
 
+impl GameSystemStruct {
+    pub fn screen_texture(&self) -> &wgpu::Texture {
+        &self.screen_texture.0
+    }
+
+    pub fn create_screen_texture(state: &State) -> wgpu::Texture {
+        state.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Game screen texture"),
+            size: wgpu::Extent3d { width: state.config.width, height: state.config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: state.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+
+            sample_count: GameSystem::MSAA_SAMPLES,
+        })
+    }
+}
+
 pub struct GameSystem {
     data: Option<GameSystemStruct>,
 }
 
 impl GameSystem {
+    const MSAA_SAMPLES: u32 = 4;
+    
     pub fn new() -> Self {
         Self {
             data: None
@@ -221,15 +243,18 @@ impl System for GameSystem {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
-                count: 1,
+                count: Self::MSAA_SAMPLES,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
         });
 
+        let screen_texture = GameSystemStruct::create_screen_texture(state);
+
         self.data = Some(GameSystemStruct {
             render_pipeline,
+            screen_texture: (screen_texture, false),
         
             view_uniform,
             view_bind_group,
@@ -252,11 +277,31 @@ impl System for GameSystem {
         if let Some(game) = self.data.as_mut() {
             match &mut game.bezier_uniform {
                 (bezier_uniform, dirty) if *dirty => {
+                    *dirty = false;
+
                     bezier_uniform.update_from(&game.bezier_segment, bezier_uniform.stroke_width, game.tolerance, game.pixel_ratio);
                     state.queue.write_buffer(&game.bezier_buffer, 0, bytemuck::cast_slice(&[*bezier_uniform]));
                 },
                 _ => {}
             }
+
+            if game.screen_texture.1 {
+                game.screen_texture = (GameSystemStruct::create_screen_texture(state), false);
+            }
+        }
+    }
+
+    fn precess(&mut self, event: &winit::event::WindowEvent) -> bool {
+        if let Some(gane) = &mut self.data {
+            match event {
+                WindowEvent::Resized(_physical_size) => {
+                    gane.screen_texture.1 = true;
+                    false
+                },
+                _ => false
+            }
+        } else {
+            false
         }
     }
 
@@ -265,15 +310,22 @@ impl System for GameSystem {
             let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Game Render Encoder"),
             });
+
+            let game_view = game.screen_texture().create_view(&wgpu::TextureViewDescriptor::default() );
     
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Game Render Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
+                        view: &game_view,
+                        resolve_target: Some(view),
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.,
+                                g: 0.,
+                                b: 0.,
+                                a: 1.,
+                            }),
                             store: true,
                         },
                     })],
