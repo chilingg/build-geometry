@@ -1,10 +1,6 @@
 use wgpu::util::DeviceExt;
 
-use winit::{
-    event::*,
-    event_loop::{ ControlFlow, EventLoop },
-    window::{ Window, WindowBuilder },
-};
+use winit::event::*;
 
 use backend::app::{ System, State };
 
@@ -28,6 +24,10 @@ impl<T> DirtyFlag<T> {
             panic!("Read dirtied data!");
         }
 
+        &self.data
+    }
+
+    pub fn unchecked_read(&self) -> &T {
         &self.data
     }
 
@@ -98,13 +98,20 @@ struct MatrixUniform {
 }
 
 impl MatrixUniform {
-    pub fn update(&mut self, center: Point, size: Size, pixel_ratio: f32) {
-        self.view_proj = [
-            [1.0/size.width, 0.0, 0.0, center.x],
-            [0.0, 1.0/size.height, 0.0, center.y],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
+    pub fn from_view(view_data: &ViewData) -> Self {
+        let c0r0 = 2.0 / view_data.size.width / view_data.pixel_size;
+        let c1r1 = 2.0 / view_data.size.height / view_data.pixel_size;
+        let c3r0 = -view_data.center.x * c0r0;
+        let c3r1 = -view_data.center.y * c1r1;
+
+        MatrixUniform {
+            view_proj: [
+                [c0r0, 0.0, 0.0, 0.0],
+                [0.0, c1r1, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [c3r0, c3r1, 0.0, 1.0],
+            ]
+        }
     }
 }
 
@@ -121,17 +128,38 @@ impl Default for MatrixUniform {
     }
 }
 
+pub struct ViewData {
+    center: Point,
+    pixel_size: f32,
+    size: Size,
+}
+
+pub struct InputState {
+    pub left: ElementState,
+    pub right: ElementState,
+    pub middle: ElementState,
+}
+
+#[derive(Default)]
+pub struct CursorState {
+    pub pos: Point,
+    pub moved: Option<Vector>,
+}
+
 pub struct GameSystemStruct {
     render_pipeline: wgpu::RenderPipeline,
     pub screen_texture: DirtyFlag<wgpu::Texture>,
 
     view_bind_group: wgpu::BindGroup,
-    center: Point,
-    pixel_ratio: f32,
+    view_bind_buffer: wgpu::Buffer,
+    pub view_data: DirtyFlag<ViewData>,
 
     bezier_bind_group: wgpu::BindGroup,
     bezier_buffer: wgpu::Buffer,
     pub bezier_data: DirtyFlag<BezierData>,
+
+    input_state: InputState,
+    cursor_state: CursorState,
 }
 
 impl GameSystemStruct {
@@ -146,6 +174,14 @@ impl GameSystemStruct {
 
             sample_count: GameSystem::MSAA_SAMPLES,
         })
+    }
+
+    pub fn point_from_window(&self, point: &winit::dpi::PhysicalPosition<f64>) -> Point {
+        let view_data = self.view_data.unchecked_read();
+        Point::new(
+            (point.x as f32 - view_data.size.width / 2.0) * view_data.pixel_size + view_data.center.x,
+            (view_data.size.height / 2.0 - point.y as f32) * view_data.pixel_size + view_data.center.y,
+        )
     }
 }
 
@@ -164,15 +200,17 @@ impl GameSystem {
 }
 
 impl System for GameSystem {
-    fn start(&mut self, state: &State) {
-        let center = Point::new(0.0, 0.0);
-        let pixel_ratio = 1.0;
-        let tolerance = 10.0;
-        let stroke_width = 10.0;
-    
+    fn start(&mut self, state: &State) {    
+        let input_state = InputState {
+            left: ElementState::Released,
+            right: ElementState::Released,
+            middle: ElementState::Released,
+        };
+        let cursor_state = CursorState::default(); 
+
         let bezier_segment = BezierSegment {
-            from: Point::new(0.0, -400.0),
-            ctrl1: Point::new(-400.0, -400.0),
+            from: Point::new(0.0, 0.0),
+            ctrl1: Point::new(0.0, 200.0),
             ctrl2: Point::new(400.0, 400.0),
             to: Point::new(0.0, 400.0),
         };
@@ -212,12 +250,15 @@ impl System for GameSystem {
             label: Some("bezier_bind_group"),
         });
     
-        let mut view_uniform = MatrixUniform::default();
-        view_uniform.update(center, Size::new(state.config.width as _, state.config.height as _), pixel_ratio);
-        let view_buffer = state.device.create_buffer_init(
+        let view_data = ViewData {
+            center: Point::new(0.0, 0.0),
+            pixel_size: 1.0,
+            size: Size::new(state.config.width as _, state.config.height as _),
+        };
+        let view_bind_buffer = state.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("View Buffer"),
-                contents: bytemuck::cast_slice(&[view_uniform]),
+                contents: bytemuck::cast_slice(&[MatrixUniform::from_view(&view_data)]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             }
         );
@@ -241,7 +282,7 @@ impl System for GameSystem {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: view_buffer.as_entire_binding(),
+                    resource: view_bind_buffer.as_entire_binding(),
                 },
             ],
             label: Some("view_bind_group"),
@@ -301,13 +342,16 @@ impl System for GameSystem {
             render_pipeline,
             screen_texture: DirtyFlag::new(screen_texture),
         
+            view_data: DirtyFlag::new(view_data),
             view_bind_group,
-            center,
-            pixel_ratio,
+            view_bind_buffer,
         
             bezier_data: DirtyFlag::new(bezier_data),
             bezier_bind_group,
             bezier_buffer,
+
+            input_state,
+            cursor_state,
         })
     }
 
@@ -322,18 +366,97 @@ impl System for GameSystem {
                 state.queue.write_buffer(&game.bezier_buffer, 0, bytemuck::cast_slice(&[BezierUniform::from(bezier_data)]));
                 game.bezier_data.clean_flag();
             }
+
+            if game.input_state.middle == ElementState::Pressed {
+                if let Some(moved) = game.cursor_state.moved.as_mut() {
+                    game.view_data.write().center -= *moved;
+                    game.cursor_state.pos -= *moved;
+                }
+            }
+
+            if let (view_data, true) = game.view_data.get_all() {
+                state.queue.write_buffer(
+                    &game.view_bind_buffer,
+                    0,
+                    bytemuck::cast_slice(&[MatrixUniform::from_view(&view_data)]),
+                );
+                game.view_data.clean_flag();
+            }
+
             if game.screen_texture.is_dirty() {
                 game.screen_texture = DirtyFlag::new(GameSystemStruct::create_screen_texture(state));
             }
+
+            game.cursor_state.moved = None;
         }
     }
 
-    fn precess(&mut self, event: &winit::event::WindowEvent) -> bool {
-        if let Some(gane) = &mut self.data {
+    fn precess(&mut self, event: &WindowEvent) -> bool {
+        if let Some(game) = &mut self.data {
             match event {
-                WindowEvent::Resized(_physical_size) => {
-                    gane.screen_texture.set_dirty();
+                WindowEvent::MouseWheel {
+                    delta: MouseScrollDelta::LineDelta(_, v),
+                    ..
+                } => {
+                    game.view_data.write().pixel_size *= 1.0 + -v * 0.2;
+                    true
+                },
+                WindowEvent::MouseInput {
+                    state,
+                    button,
+                    ..
+                } => {
+                    match button {
+                        MouseButton::Left => game.input_state.left = *state,
+                        MouseButton::Right => game.input_state.right = *state,
+                        MouseButton::Middle => game.input_state.middle = *state,
+                        _ => return false
+                    }
+                    true
+                },
+                WindowEvent::CursorMoved {
+                    position,
+                    ..
+                } => {
+                    let position = game.point_from_window(position);
+                    *game.cursor_state.moved.get_or_insert(Vector::zero()) += position - game.cursor_state.pos;
+                    game.cursor_state.pos = position;
+                    
                     false
+                },
+                WindowEvent::Resized(physical_size) => {
+                    game.screen_texture.set_dirty();
+                    game.view_data.write().size = Size::new(physical_size.width as _, physical_size.height as _);
+                    false
+                },
+                WindowEvent::KeyboardInput {
+                    input: KeyboardInput {
+                        virtual_keycode: Some(key),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                    ..
+                } => {
+                    const ADVANCE: f32 = 40.0;
+                    match key {
+                        VirtualKeyCode::W | VirtualKeyCode::Up => {
+                            game.view_data.write().center.y -= ADVANCE;
+                            true
+                        }
+                        VirtualKeyCode::A | VirtualKeyCode::Left => {
+                            game.view_data.write().center.x += ADVANCE;
+                            true
+                        }
+                        VirtualKeyCode::S | VirtualKeyCode::Down => {
+                            game.view_data.write().center.y += ADVANCE;
+                            true
+                        }
+                        VirtualKeyCode::D | VirtualKeyCode::Right => {
+                            game.view_data.write().center.x -= ADVANCE;
+                            true
+                        }
+                        _ => false,
+                    }
                 },
                 _ => false
             }

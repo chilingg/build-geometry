@@ -14,8 +14,8 @@ fn main() {
     let window = WindowBuilder::new()
         // .with_maximized(true)
         .with_inner_size( winit::dpi::PhysicalSize {
-                width: 500,
-                height: 500,
+                width: 800,
+                height: 800,
         })
         .build(&event_loop)
         .unwrap();
