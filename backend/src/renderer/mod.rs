@@ -2,11 +2,13 @@ use crate::{
     app::State,
     data::prelude::*,
     scene_system::Scene,
+    data::prelude::*,
 };
 
 use wgpu::util::DeviceExt;
 
 const MSAA_SAMPLES: u32 = 4;
+const DEFAULT_VIEW_SIZE: WorldSize = WorldSize::new(1000.0, 1000.0);
 
 pub fn create_multisample_texture(state: &State, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
     state.device.create_texture(&wgpu::TextureDescriptor {
@@ -29,7 +31,7 @@ pub fn gen_view_data(state: &State) -> ViewData {
     let view_data = ViewData {
         center: WorldPoint::new(0.0, 0.0),
         size: ScreenSize::new(state.config.width as _, state.config.height as _),
-        pixel_size: 0.0,
+        pixel_size: 1.0,
     };
     view_data
 }
@@ -41,11 +43,22 @@ pub trait Renderer {
         *self.sample_texture() = create_multisample_texture(state, size);
     }
 
-    fn update_view(&self, view_data: &ViewData, state: &State);
+    fn update_view(&self, view_data: &ViewData, state: &State) {
+        self.update_view_matrix(&ProjMatrix::look_to(view_data), state)
+    }
+
+    fn update_view_in_resize(&self, view_data: &mut ViewData, state: &State) {
+        self.update_view_matrix(
+            &ProjMatrix::look_to_range(view_data, DEFAULT_VIEW_SIZE),
+            state
+        )
+    }
+
+    fn update_view_matrix(&self, view_mat: &ProjMatrix, state: &State);
 
     fn update_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State);
 
-    fn start_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State);
+    fn init_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State);
 
     fn render(&mut self, state: &State, view: &wgpu::TextureView);
 }
@@ -81,15 +94,15 @@ impl Renderer for DefaultRenderer {
         &mut self.sample_texture
     }
 
-    fn update_view(&self, view_data: &ViewData, state: &State) {
+    fn update_view_matrix(&self, view_mat: &ProjMatrix, state: &State) {
         state.queue.write_buffer(
             &self.proj_buffer,
             0,
-            bytemuck::cast_slice(&[ProjMatrix::look_to(view_data).to_arrays()]),
+            bytemuck::cast_slice(&[view_mat.to_array()]),
         );
     }
 
-    fn start_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State) {
+    fn init_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State) {
         let mut file_tessellator = FillTessellator::new();
         let mut file_options = FillOptions::default();
         file_options.tolerance *= pixel_size;
@@ -97,6 +110,7 @@ impl Renderer for DefaultRenderer {
         let mut stroke_tessellator = StrokeTessellator::new();
         let mut stroke_options = StrokeOptions::default();
         stroke_options.tolerance *= pixel_size;
+        stroke_options.line_width = 10.0;
 
         self.graphs = scene.graph.iter().map(|graph| {
             let mut output = DefaultVertexBuffers::new();
@@ -112,7 +126,7 @@ impl Renderer for DefaultRenderer {
                         center.cast_unit(), 
                         *radius, &stroke_options, 
                         &mut builder
-                    );
+                    ).expect("Failed tessellation graph stroke!");
 
                     let vertex_buffer = state.device.create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
@@ -169,7 +183,7 @@ impl Renderer for DefaultRenderer {
             render_pass.set_pipeline(&self.render_pipeline);
 
             self.graphs.iter().for_each(|(vertex_buffer, index_buffer, num)| {
-                state.queue.write_buffer(&self.color_buffer, 0, bytemuck::cast_slice(&[1.0, 0.0, 0.0, 1.0]));
+                state.queue.write_buffer(&self.color_buffer, 0, bytemuck::cast_slice(&[1.0f32, 0.0f32, 0.0f32, 1.0f32]));
                 render_pass.set_bind_group(0, &self.bind_group, &[]);
 
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));

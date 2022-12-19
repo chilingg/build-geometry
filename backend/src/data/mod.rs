@@ -6,7 +6,7 @@ pub mod color;
 use lyon::geom::euclid;
 
 pub mod prelude {
-    pub use super::matrix::ProjectWorldToScreen;
+    pub use super::matrix::ProjectWorldToViewport;
     pub use super::color;
 
     pub use lyon::path::Path;
@@ -20,7 +20,9 @@ pub mod prelude {
     pub type WorldSize = super::euclid::Size2D<f32, WorldSpace>;
     pub type WorldVector = super::euclid::Vector2D<f32, WorldSpace>;
     
-    pub type ProjMatrix = super::euclid::Transform3D<f32, WorldSpace, ScreenSpace>;
+    pub struct ViewportSpace;
+    pub type ViewportPoint = super::euclid::Point2D<f32, ViewportSpace>;
+    pub type ProjMatrix = super::euclid::Transform3D<f32, WorldSpace, ViewportSpace>;
 
     pub use super::graph::GraphType;
 

@@ -7,7 +7,7 @@ use crate:: {
 };
 
 mod controller;
-use controller::Controller;
+use controller::{ Controller, CursorState };
 
 mod scene;
 pub use scene::Scene;
@@ -31,6 +31,14 @@ impl SceneSystem {
             renderer: Box::new(renderer)
         }
     }
+
+    pub fn view_data(&self) -> &ViewData {
+        self.view_data.unchecked_read()
+    }
+
+    pub fn cursor_data(&self) -> &CursorState {
+        &self.ctrl.cursor_state
+    }
 }
 
 impl System for SceneSystem {
@@ -39,7 +47,7 @@ impl System for SceneSystem {
         self.renderer.update_view(&view_data, state);
         *self.view_data.write() = view_data;
 
-        self.renderer.start_in_scene(&self.scene, self.view_data.unchecked_read().pixel_size, state);
+        self.renderer.init_in_scene(&self.scene, self.view_data.unchecked_read().pixel_size, state);
     }
 
     fn update(&mut self, state: &State) {
@@ -47,14 +55,18 @@ impl System for SceneSystem {
             self.renderer.resize(size, state);
         }
 
-        self.ctrl.update(&mut self.view_data);
-
         if let (view_data, true) = self.view_data.get_all() {
-            self.renderer.update_view(view_data, state);
+            if self.ctrl.window_resize().is_some() {
+                self.renderer.update_view_in_resize(view_data, state);
+            } else {
+                self.renderer.update_view(view_data, state);
+            }
             self.view_data.clean_flag();
         }
 
         self.renderer.update_scene(&self.scene, self.view_data.read().pixel_size, state);
+
+        self.ctrl.update(&mut self.view_data);
     }
 
     fn precess(&mut self, event: &WindowEvent) -> bool {

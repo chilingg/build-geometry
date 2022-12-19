@@ -2,23 +2,23 @@
 pub struct Rgba8(u32);
 
 impl Rgba8 {
-    fn r(&self) -> u8 {
+    pub fn r(&self) -> u8 {
         (self.0 >> 24) as u8
     }
 
-    fn g(&self) -> u8 {
+    pub fn g(&self) -> u8 {
         ((self.0 >> 16) & 0xff) as u8
     }
 
-    fn b(&self) -> u8 {
+    pub fn b(&self) -> u8 {
         ((self.0 >> 8) & 0xff) as u8
     }
 
-    fn a(&self) -> u8 {
+    pub fn a(&self) -> u8 {
         (self.0 & 0xff) as u8
     }
 
-    fn to_array(&self) -> [u8; 4] {
+    pub fn to_array(&self) -> [u8; 4] {
         [self.r(), self.g(), self.b(), self.a()]
     }
 }

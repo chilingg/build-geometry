@@ -9,6 +9,7 @@ use backend::{
         Scene,
     },
     renderer::DefaultRenderer,
+    data::prelude::*,
 };
 
 use egui_wgpu::renderer::{
@@ -53,9 +54,13 @@ impl UiSystem {
 impl System for UiSystem {
     fn start(&mut self, state: &State) {
         self.ctx.set_style(style_editor::default_style());
+
         let mut game = SceneSystem::new(
             Scene{
-                graph: vec![],
+                graph: vec![
+                    GraphType::Circle { center: WorldPoint::new(0.0, 0.0), radius: 200.0 },
+                    GraphType::Circle { center: WorldPoint::new(0.0, 300.0), radius: 200.0 },
+                    ],
                 tip: vec![],
             },
             DefaultRenderer::new(state)

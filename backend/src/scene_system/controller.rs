@@ -5,8 +5,8 @@ use crate::{
 use winit::event::*;
 
 pub struct Controller {
+    pub cursor_state: CursorState,
     input_state: InputState,
-    cursor_state: CursorState,
     resize_event: Option<winit::dpi::PhysicalSize<u32>>
 }
 
@@ -47,14 +47,14 @@ impl Controller {
     }
 
     pub fn precess(&mut self, event: &WindowEvent, view_data: &mut DirtyFlag<ViewData>) -> bool {
-        const SCALE_SPEED: f32 = 0.2;
+        const SCALE_SPEED: f32 = 0.8;
 
         match event {
             WindowEvent::MouseWheel {
                 delta: MouseScrollDelta::LineDelta(_, v),
                 ..
             } => {
-                view_data.write().pixel_size *= 1.0 + -v * SCALE_SPEED;
+                view_data.write().pixel_size *= SCALE_SPEED.powi(*v as i32);
                 true
             },
             WindowEvent::MouseInput {
