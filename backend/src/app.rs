@@ -13,7 +13,7 @@ pub trait System {
     fn start(&mut self, state: &State) {}
     fn finish(&mut self) {}
     fn update(&mut self, state: &State) {}
-    fn render(&mut self, state: &State, view: &wgpu::TextureView) {}
+    fn render(&mut self, state: &State, output: &wgpu::SurfaceTexture) {}
     fn precess(&mut self, event: &winit::event::WindowEvent) -> bool { false }
 }
 
@@ -50,8 +50,8 @@ impl<T> App<T> {
                 },
                 Event::RedrawRequested(window_id) if window_id == state.window.id() => {
                     match state.get_screen_texture() {
-                        Ok((output, view)) => {
-                            system.render(&state, &view);
+                        Ok(output) => {
+                            system.render(&state, &output);
                             output.present();
                         },
                         // 如果发生上下文丢失，就重新配置 surface
@@ -114,7 +114,7 @@ impl State {
         )).expect("Couldn't create the device!");
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::all(),
             format: *surface.get_supported_formats(&adapter).first().unwrap(),
             width: size.width,
             height: size.height,
@@ -144,10 +144,9 @@ impl State {
         winit::dpi::PhysicalSize::new(self.config.width, self.config.height)
     }
 
-    pub fn get_screen_texture(&self) -> Result<(wgpu::SurfaceTexture, wgpu::TextureView), wgpu::SurfaceError> {
+    pub fn get_screen_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
         
-        Ok((output, view))
+        Ok(output)
     }
 }

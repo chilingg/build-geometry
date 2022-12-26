@@ -2,52 +2,18 @@ use crate::{
     app::State,
     data::prelude::*,
     scene_system::Scene,
-    data::prelude::*,
 };
 
 use wgpu::util::DeviceExt;
 
-const MSAA_SAMPLES: u32 = 4;
 const DEFAULT_VIEW_SIZE: WorldSize = WorldSize::new(1000.0, 1000.0);
 
-pub fn create_multisample_texture(state: &State, size: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
-    state.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Game screen texture"),
-        size: wgpu::Extent3d { width: size.width, height: size.height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: state.config.format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-
-        sample_count: MSAA_SAMPLES,
-    })
-}
-
-pub fn create_multisample_texture_from_state(state: &State) -> wgpu::Texture {
-    create_multisample_texture(state, state.size())
-}
-
-pub fn gen_view_data(state: &State) -> ViewData {
-    let view_data = ViewData {
-        center: WorldPoint::new(0.0, 0.0),
-        size: ScreenSize::new(state.config.width as _, state.config.height as _),
-        pixel_size: 1.0,
-    };
-    view_data
-}
-
 pub trait Renderer {
-    fn sample_texture<'a>(&'a mut self) -> &'a mut wgpu::Texture;
-
-    fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>, state: &State) {
-        *self.sample_texture() = create_multisample_texture(state, size);
-    }
-
     fn update_view(&self, view_data: &ViewData, state: &State) {
         self.update_view_matrix(&ProjMatrix::look_to(view_data), state)
     }
 
-    fn update_view_in_resize(&self, view_data: &mut ViewData, state: &State) {
+    fn update_view_in_resize(&mut self, view_data: &mut ViewData, state: &State) {
         self.update_view_matrix(
             &ProjMatrix::look_to_range(view_data, DEFAULT_VIEW_SIZE),
             state
@@ -56,11 +22,11 @@ pub trait Renderer {
 
     fn update_view_matrix(&self, view_mat: &ProjMatrix, state: &State);
 
-    fn update_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State);
+    fn update_scene(&mut self, scene: &Scene, state: &State);
 
-    fn init_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State);
+    fn init_in_scene(&mut self, scene: &Scene, state: &State);
 
-    fn render(&mut self, state: &State, view: &wgpu::TextureView);
+    fn render(&mut self, state: &State, output: &wgpu::SurfaceTexture);
 }
 
 use lyon::tessellation::{
@@ -79,7 +45,10 @@ type GraphMeshStack = Vec<(wgpu::Buffer, wgpu::Buffer, usize)>;
 
 pub struct DefaultRenderer {
     render_pipeline: wgpu::RenderPipeline,
-    sample_texture: wgpu::Texture,
+
+    effects_compute_pipeline: wgpu::ComputePipeline,
+    effects_buffer: wgpu::Buffer,
+    effects_buffer_bytes_per_row: u32,
 
     proj_buffer: wgpu::Buffer,
     color_buffer: wgpu::Buffer,
@@ -90,8 +59,12 @@ pub struct DefaultRenderer {
 }
 
 impl Renderer for DefaultRenderer {
-    fn sample_texture<'a>(&'a mut self) -> &'a mut wgpu::Texture {
-        &mut self.sample_texture
+    fn update_view_in_resize(&mut self, view_data: &mut ViewData, state: &State) {
+        self.reset_effects_buffer(state);
+        self.update_view_matrix(
+            &ProjMatrix::look_to_range(view_data, DEFAULT_VIEW_SIZE),
+            state
+        )
     }
 
     fn update_view_matrix(&self, view_mat: &ProjMatrix, state: &State) {
@@ -102,14 +75,12 @@ impl Renderer for DefaultRenderer {
         );
     }
 
-    fn init_in_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State) {
+    fn init_in_scene(&mut self, scene: &Scene, state: &State) {
         let mut file_tessellator = FillTessellator::new();
         let mut file_options = FillOptions::default();
-        file_options.tolerance *= pixel_size;
 
         let mut stroke_tessellator = StrokeTessellator::new();
         let mut stroke_options = StrokeOptions::default();
-        stroke_options.tolerance *= pixel_size;
         stroke_options.line_width = 10.0;
 
         self.graphs = scene.graph.iter().map(|graph| {
@@ -151,28 +122,29 @@ impl Renderer for DefaultRenderer {
         }).collect();
     }
 
-    fn update_scene(&mut self, scene: &Scene, pixel_size: f32, state: &State) {
+    fn update_scene(&mut self, scene: &Scene, state: &State) {
         ;
     }
 
-    fn render(&mut self, state: &State, view: &wgpu::TextureView) {
+    fn render(&mut self, state: &State, output: &wgpu::SurfaceTexture) {
         let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Game Render Encoder"),
         });
-        let game_view = self.sample_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Render pass
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Game Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &game_view,
-                    resolve_target: Some(view),
+                    view: &view,
+                    resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.,
                             g: 0.,
                             b: 0.,
-                            a: 1.,
+                            a: 0.,
                         }),
                         store: true,
                     },
@@ -189,40 +161,96 @@ impl Renderer for DefaultRenderer {
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..*num as u32, 0, 0..1);
-            })
+            });
         }
+
+        // Compute pass
+        {
+            let bind_group = state.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Effects bind group"),
+                layout: &self.effects_compute_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.effects_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+    
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Effects Pass"),
+            });
+            compute_pass.set_pipeline(&self.effects_compute_pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            compute_pass.dispatch_workgroups(
+                state.config.width / 16 + 1,
+                state.config.height / 16 + 1,
+                1
+            );
+        }
+
+        encoder.copy_buffer_to_texture(
+            wgpu::ImageCopyBuffer {
+                buffer: &self.effects_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: std::num::NonZeroU32::new(self.effects_buffer_bytes_per_row),
+                    rows_per_image: None,
+                }
+            },
+            wgpu::ImageCopyTexture {
+                texture: &output.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d { width: state.config.width, height: state.config.height, depth_or_array_layers: 1 },
+        );
 
         state.queue.submit(std::iter::once(encoder.finish()));
     }
 }
 
 impl DefaultRenderer {
-    pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         static ATTRIBS: [wgpu::VertexAttribute; 1]  = wgpu::vertex_attr_array![0 => Float32x2];
-        // [
-        //     wgpu::VertexAttribute {
-        //         offset: 0,
-        //         shader_location: 0,
-        //         format: wgpu::VertexFormat::Float32x3,
-        //     },
-        //     wgpu::VertexAttribute {
-        //         offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-        //         shader_location: 1,
-        //         format: wgpu::VertexFormat::Float32x3,
-        //     },
-        // ]
+        
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &ATTRIBS,
         }
     }
-    
-    pub fn new(state: &State) -> Self {
-        Self::from_size(state, state.size())
+
+    fn reset_effects_buffer(&mut self, state: &State) {
+        let (buffer, size) = Self::create_effects_buffer(state);
+
+        self.effects_buffer_bytes_per_row = size;
+        self.effects_buffer = buffer;
     }
 
-    fn from_size(state: &State, size: winit::dpi::PhysicalSize<u32>) -> Self {
+    fn create_effects_buffer(state: &State) -> (wgpu::Buffer, u32) {
+        const PIXEL_SIZE: u32 = std::mem::size_of::<u32>() as u32;
+        const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+
+        let unpadded_bytes_per_row = PIXEL_SIZE * state.config.width;
+        let padding = (ALIGN - unpadded_bytes_per_row % ALIGN) % ALIGN;
+        let padded_bytes_per_row = unpadded_bytes_per_row + padding;
+        let buffer_size = (padded_bytes_per_row * state.config.height) as wgpu::BufferAddress;
+
+        (state.device.create_buffer(&wgpu::BufferDescriptor {
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::STORAGE,
+            label: None,
+            mapped_at_creation: false,
+        }), padded_bytes_per_row)
+    }
+    
+    pub fn new(state: &State) -> Self {
         let proj_buffer = state.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Projection buffer"),
             size: std::mem::size_of::<[f32; 16]>() as u64,
@@ -314,18 +342,27 @@ impl DefaultRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: 1,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
         });
 
-        let sample_texture = create_multisample_texture(state, size);
-
+        let (effects_buffer, effects_buffer_bytes_per_row) = Self::create_effects_buffer(state);
+        let effects_compute_pipeline = state.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Effects compute pipeline"),
+            layout: None,
+            module: &state.device.create_shader_module(wgpu::include_wgsl!("effects.wgsl")),
+            entry_point: "cp_main",
+        });
+    
         Self {
             render_pipeline,
-            sample_texture, 
+
+            effects_buffer,
+            effects_compute_pipeline,
+            effects_buffer_bytes_per_row,
 
             color_buffer,
             proj_buffer,

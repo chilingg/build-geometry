@@ -118,10 +118,11 @@ impl System for UiSystem {
         }
     }
 
-    fn render(&mut self, state: &State, view: &wgpu::TextureView) {
+    fn render(&mut self, state: &State, output: &wgpu::SurfaceTexture) {
         if let Some(game) = &mut self.game {
-            game.render(state, view);
+            game.render(state, output);
             
+            let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
             if let Some((textures_delta, paint_jobs)) = self.output_data.take() {
                 let mut encoder = state.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("encoder"),
